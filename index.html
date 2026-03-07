@@ -8,15 +8,25 @@
   <title>Калории</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
-  
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
     ::-webkit-scrollbar { width: 0px; background: transparent; }
-    body { background-color: #09090b; margin: 0; padding: 0; overscroll-behavior-y: none; }
+    
+    /* ЖЕСТКАЯ ФИКСАЦИЯ ЭКРАНА ДЛЯ iOS PWA */
+    html, body { 
+      position: fixed; 
+      top: 0; left: 0; right: 0; bottom: 0;
+      overflow: hidden; 
+      background-color: #09090b; 
+      margin: 0; 
+      padding: 0; 
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    #root { width: 100%; height: 100%; }
   </style>
 </head>
 <body>
@@ -60,7 +70,6 @@
 
     // --- Основной компонент ---
     function App() {
-      // 1. Состояние: Продукты
       const [foods, setFoods] = useState(() => {
         try {
           const saved = localStorage.getItem('calorieTracker_foods');
@@ -75,7 +84,6 @@
         ];
       });
 
-      // 2. Состояние: Журнал
       const [dailyLogs, setDailyLogs] = useState(() => {
         try {
           const saved = localStorage.getItem('calorieTracker_logs');
@@ -84,7 +92,6 @@
         return {};
       });
 
-      // 3. Состояние: Суточная норма (по умолчанию 2000)
       const [dailyGoal, setDailyGoal] = useState(() => {
         try {
           const saved = localStorage.getItem('calorieTracker_goal');
@@ -93,7 +100,6 @@
         return 2000;
       });
 
-      // UI Состояния
       const [currentDate, setCurrentDate] = useState(getLocalDateString(new Date()));
       const [activeTab, setActiveTab] = useState('diary');
       const [selectedFoodId, setSelectedFoodId] = useState('');
@@ -101,12 +107,10 @@
       const [newFoodName, setNewFoodName] = useState('');
       const [newFoodCals, setNewFoodCals] = useState('');
 
-      // Сохранение в память телефона
       useEffect(() => localStorage.setItem('calorieTracker_foods', JSON.stringify(foods)), [foods]);
       useEffect(() => localStorage.setItem('calorieTracker_logs', JSON.stringify(dailyLogs)), [dailyLogs]);
       useEffect(() => localStorage.setItem('calorieTracker_goal', dailyGoal.toString()), [dailyGoal]);
 
-      // Обработчики
       const handleAddFood = (e) => {
         e.preventDefault();
         if (!newFoodName.trim() || !newFoodCals) return;
@@ -144,7 +148,6 @@
         setFoods(foods.filter(f => f.id !== foodId));
       };
 
-      // Расчеты для текущего дня
       const currentDayLogs = dailyLogs[currentDate] || [];
       const totalDailyCalories = currentDayLogs.reduce((sum, log) => sum + log.totalCalories, 0);
       
@@ -161,25 +164,22 @@
       }, [selectedFoodId, gramsInput, foods]);
 
       return (
-        <div className="min-h-screen bg-zinc-950 flex justify-center font-sans text-zinc-100">
-          <div className="w-full max-w-md bg-zinc-900 shadow-2xl flex flex-col h-[100dvh]">
+        <div className="h-full w-full bg-zinc-950 flex justify-center font-sans text-zinc-100">
+          <div className="w-full max-w-md bg-zinc-900 flex flex-col h-full overflow-hidden shadow-2xl">
             
-            {/* ШАПКА */}
+            {/* ШАПКА: теперь это жестко зафиксированный блок */}
             <header 
-              className="px-6 pb-4 border-b border-zinc-800 flex items-center justify-center bg-zinc-900/95 backdrop-blur-md z-10 sticky top-0"
+              className="px-6 pb-4 border-b border-zinc-800 flex items-center justify-center bg-zinc-900 flex-shrink-0"
               style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}
             >
               <h1 className="text-xl font-semibold tracking-tight">{activeTab === 'diary' ? 'Дневник питания' : 'Справочник'}</h1>
             </header>
 
-            {/* ОСНОВНОЙ КОНТЕНТ */}
-            <main className="flex-1 overflow-y-auto pb-36">
+            {/* ОСНОВНОЙ КОНТЕНТ: только эта часть имеет право скроллиться */}
+            <main className="flex-1 overflow-y-auto overscroll-contain w-full">
               
-              {/* ================= Вкладка: ДНЕВНИК ================= */}
               {activeTab === 'diary' && (
-                <div className="p-6 flex flex-col h-full space-y-6">
-                  
-                  {/* Навигация по датам */}
+                <div className="p-6 space-y-6 pb-10">
                   <div className="flex items-center justify-between bg-zinc-800/50 rounded-2xl p-2 border border-zinc-800">
                     <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(getLocalDateString(d));}} className="p-3 hover:bg-zinc-800 rounded-xl">
                       <IconChevronLeft className="w-5 h-5 text-zinc-400" />
@@ -191,7 +191,6 @@
                     </button>
                   </div>
 
-                  {/* Дашборд прогресса калорий */}
                   <div className="bg-zinc-800/40 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4">
                      <div className="flex justify-between items-end">
                         <div>
@@ -205,26 +204,21 @@
                            </p>
                         </div>
                      </div>
-                     {/* Прогресс бар */}
                      <div className="h-2.5 w-full bg-zinc-900 rounded-full overflow-hidden flex border border-zinc-800">
-                        <div
-                           className={`h-full transition-all duration-500 rounded-full ${isOverGoal ? 'bg-red-500' : 'bg-emerald-500'}`}
-                           style={{ width: `${progressPercent}%` }}
-                        ></div>
+                        <div className={`h-full transition-all duration-500 rounded-full ${isOverGoal ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${progressPercent}%` }}></div>
                      </div>
                   </div>
 
-                  {/* Ввод съеденного */}
                   <form onSubmit={handleAddLog} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4">
                     <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Добавить приём пищи</h2>
-                    <select className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={selectedFoodId} onChange={(e) => setSelectedFoodId(e.target.value)} required>
+                    <select className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={selectedFoodId} onChange={(e) => setSelectedFoodId(e.target.value)} required>
                       <option value="" disabled className="text-zinc-500">Выберите продукт...</option>
                       {foods.map(f => <option key={f.id} value={f.id}>{f.name} ({f.calories} ккал)</option>)}
                     </select>
 
                     <div className="flex gap-3">
                       <div className="flex-1 relative">
-                        <input type="number" placeholder="0" min="1" className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 rounded-2xl px-4 py-3.5 pr-12 outline-none focus:ring-2 focus:ring-emerald-500/30" value={gramsInput} onChange={(e) => setGramsInput(e.target.value)} required />
+                        <input type="number" placeholder="0" min="1" className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-12 outline-none focus:ring-2 focus:ring-emerald-500/30" value={gramsInput} onChange={(e) => setGramsInput(e.target.value)} required />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 font-medium">г</span>
                       </div>
                       <button type="submit" disabled={!selectedFoodId || !gramsInput} className="bg-emerald-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white p-3.5 rounded-2xl flex-shrink-0 transition-transform active:scale-95">
@@ -234,7 +228,6 @@
                     {previewCalories > 0 && <div className="text-sm text-zinc-400 text-center">Плюс <span className="font-medium text-emerald-400">{previewCalories} ккал</span> к дневнику</div>}
                   </form>
 
-                  {/* Список */}
                   <div>
                     <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">История за день</h2>
                     {currentDayLogs.length === 0 ? (
@@ -259,11 +252,8 @@
                 </div>
               )}
 
-              {/* ================= Вкладка: СПРАВОЧНИК ================= */}
               {activeTab === 'directory' && (
-                <div className="p-6 flex flex-col h-full space-y-8">
-                  
-                  {/* Настройка суточной нормы */}
+                <div className="p-6 space-y-8 pb-10">
                   <div>
                     <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                        <IconTarget className="w-4 h-4 text-emerald-500" /> Ваша цель
@@ -274,7 +264,7 @@
                           <input 
                              type="number" 
                              min="100" 
-                             className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-lg rounded-2xl px-4 py-3.5 pr-20 outline-none focus:ring-2 focus:ring-emerald-500/30 font-medium" 
+                             className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[18px] rounded-2xl px-4 py-3.5 pr-20 outline-none focus:ring-2 focus:ring-emerald-500/30 font-medium" 
                              value={dailyGoal || ''} 
                              onChange={(e) => setDailyGoal(Number(e.target.value))} 
                           />
@@ -283,17 +273,16 @@
                     </div>
                   </div>
 
-                  {/* Добавление нового продукта */}
                   <div>
                     <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                        <IconBook className="w-4 h-4 text-emerald-500" /> База продуктов
                     </h2>
                     <form onSubmit={handleAddFood} className="bg-emerald-950/20 border border-emerald-500/20 rounded-3xl p-5 space-y-4 mb-6">
                        <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">Добавить продукт</h3>
-                       <input type="text" placeholder="Название (например: Творог 5%)" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
+                       <input type="text" placeholder="Название (например: Творог)" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
                        <div className="flex gap-3">
                           <div className="flex-1 relative">
-                            <input type="number" placeholder="0" min="1" step="0.1" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 rounded-2xl px-4 py-3.5 pr-24 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodCals} onChange={(e) => setNewFoodCals(e.target.value)} required />
+                            <input type="number" placeholder="0" min="1" step="0.1" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-24 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodCals} onChange={(e) => setNewFoodCals(e.target.value)} required />
                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">ккал/100г</span>
                           </div>
                           <button type="submit" disabled={!newFoodName || !newFoodCals} className="bg-emerald-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white px-5 py-3.5 rounded-2xl transition-transform active:scale-95">
@@ -302,7 +291,6 @@
                        </div>
                     </form>
                     
-                    {/* Список продуктов */}
                     <ul className="space-y-3">
                       {foods.map(food => (
                         <li key={food.id} className="flex items-center justify-between bg-zinc-800/40 border border-zinc-800 rounded-2xl p-4">
@@ -316,9 +304,9 @@
               )}
             </main>
 
-            {/* НАВИГАЦИЯ */}
+            {/* НАВИГАЦИЯ: тоже жестко зафиксированный блок */}
             <nav 
-              className="bg-zinc-900/95 backdrop-blur-md border-t border-zinc-800 flex justify-around items-center fixed bottom-0 w-full max-w-md z-20 pt-2"
+              className="bg-zinc-900 border-t border-zinc-800 flex justify-around items-center flex-shrink-0 pt-2"
               style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
             >
               <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500'}`}>
@@ -330,6 +318,7 @@
                 <span className="text-[11px] font-semibold tracking-wide">Справочник</span>
               </button>
             </nav>
+
           </div>
         </div>
       );
