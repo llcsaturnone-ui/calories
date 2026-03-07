@@ -307,7 +307,7 @@
             {/* НАВИГАЦИЯ: тоже жестко зафиксированный блок */}
             <nav 
               className="bg-zinc-900 border-t border-zinc-800 flex justify-around items-center flex-shrink-0 pt-2"
-              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom) + 12px)' }}
+              style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
             >
               <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500'}`}>
                 <div className={`p-1.5 rounded-xl mb-1 ${activeTab === 'diary' ? 'bg-emerald-500/10' : ''}`}><IconCalendar className="w-6 h-6" /></div>
