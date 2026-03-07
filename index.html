@@ -15,7 +15,6 @@
   <style>
     ::-webkit-scrollbar { width: 0px; background: transparent; }
     
-    /* ЖЕСТКАЯ ФИКСАЦИЯ ЭКРАНА ДЛЯ iOS PWA */
     html, body { 
       position: fixed; 
       top: 0; left: 0; right: 0; bottom: 0;
@@ -27,6 +26,12 @@
     }
     
     #root { width: 100%; height: 100%; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
   </style>
 </head>
 <body>
@@ -34,6 +39,44 @@
 
   <script type="text/babel">
     const { useState, useMemo, useEffect } = React;
+
+    // --- Gemini API Setup ---
+    const apiKey = ""; // Ключ будет автоматически предоставлен средой выполнения
+    
+    const fetchGemini = async (prompt, asJson = false) => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+      const payload = {
+        contents: [{ parts: [{ text: prompt }] }],
+      };
+      
+      if (asJson) {
+        payload.generationConfig = { 
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: { calories: { type: "NUMBER" } }
+          }
+        };
+      }
+
+      // Экспоненциальная задержка при ошибках (до 5 попыток)
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+          const data = await res.json();
+          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+          return asJson ? JSON.parse(text) : text;
+        } catch (e) {
+          if (attempt === 4) throw e;
+          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
+        }
+      }
+    };
 
     // --- Иконки ---
     const IconPlus = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-7-7h14"/></svg>;
@@ -44,6 +87,7 @@
     const IconChevronRight = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
     const IconUtensils = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>;
     const IconTarget = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
+    const IconSpinner = ({className}) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
 
     // --- Утилиты ---
     const getLocalDateString = (dateObj) => {
@@ -106,10 +150,60 @@
       const [gramsInput, setGramsInput] = useState('');
       const [newFoodName, setNewFoodName] = useState('');
       const [newFoodCals, setNewFoodCals] = useState('');
+      
+      // ИИ Состояния
+      const [isEstimatingCals, setIsEstimatingCals] = useState(false);
+      const [aiAdvice, setAiAdvice] = useState('');
+      const [isAdviceLoading, setIsAdviceLoading] = useState(false);
 
       useEffect(() => localStorage.setItem('calorieTracker_foods', JSON.stringify(foods)), [foods]);
       useEffect(() => localStorage.setItem('calorieTracker_logs', JSON.stringify(dailyLogs)), [dailyLogs]);
       useEffect(() => localStorage.setItem('calorieTracker_goal', dailyGoal.toString()), [dailyGoal]);
+
+      // ИИ: Оценка калорий продукта
+      const estimateCaloriesWithAI = async () => {
+        if (!newFoodName.trim()) return;
+        setIsEstimatingCals(true);
+        try {
+          const prompt = `Определи примерную калорийность на 100 грамм для продукта: "${newFoodName}". Верни только JSON объект с одним полем 'calories'. Если продукт неизвестен, верни 0.`;
+          const result = await fetchGemini(prompt, true);
+          if (result && typeof result.calories === 'number') {
+            setNewFoodCals(result.calories.toString());
+          }
+        } catch (e) {
+          console.error("AI Estimation failed", e);
+        } finally {
+          setIsEstimatingCals(false);
+        }
+      };
+
+      // ИИ: Советник
+      const getAiAdvice = async () => {
+        setIsAdviceLoading(true);
+        try {
+          const currentDayLogs = dailyLogs[currentDate] || [];
+          const totalDailyCalories = currentDayLogs.reduce((sum, log) => sum + log.totalCalories, 0);
+          const remainingCalories = dailyGoal - totalDailyCalories;
+          
+          const availableFoods = foods.map(f => f.name).join(', ');
+          
+          const prompt = `Ты - позитивный, заботливый и лаконичный ИИ-диетолог.
+          Цель пользователя: ${dailyGoal} ккал.
+          Уже съедено сегодня: ${totalDailyCalories} ккал.
+          Осталось: ${remainingCalories} ккал.
+          В базе пользователя есть продукты: ${availableFoods}.
+          
+          Напиши короткий (максимум 2 предложения), дружелюбный совет на русском языке. Учитывай остаток калорий. Если есть запас - предложи что-то из базы. Если перебор - успокой. Не используй markdown и спецсимволы, пиши как живой человек.`;
+
+          const advice = await fetchGemini(prompt, false);
+          setAiAdvice(advice);
+        } catch (e) {
+          console.error("AI Advice failed", e);
+          setAiAdvice("Немного устал, не могу сейчас дать совет. Попробуйте чуть позже!");
+        } finally {
+          setIsAdviceLoading(false);
+        }
+      };
 
       const handleAddFood = (e) => {
         e.preventDefault();
@@ -135,6 +229,7 @@
           [currentDate]: [...(prev[currentDate] || []), newLog]
         }));
         setSelectedFoodId(''); setGramsInput('');
+        setAiAdvice(''); // Сбрасываем совет при добавлении новой еды
       };
 
       const handleDeleteLog = (logId) => {
@@ -142,6 +237,7 @@
           ...prev,
           [currentDate]: prev[currentDate].filter(log => log.id !== logId)
         }));
+        setAiAdvice('');
       };
 
       const handleDeleteFood = (foodId) => {
@@ -167,7 +263,7 @@
         <div className="h-full w-full bg-zinc-950 flex justify-center font-sans text-zinc-100">
           <div className="w-full max-w-md bg-zinc-900 flex flex-col h-full overflow-hidden shadow-2xl">
             
-            {/* ШАПКА: теперь это жестко зафиксированный блок */}
+            {/* ШАПКА */}
             <header 
               className="px-6 pb-4 border-b border-zinc-800 flex items-center justify-center bg-zinc-900 flex-shrink-0"
               style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}
@@ -175,24 +271,24 @@
               <h1 className="text-xl font-semibold tracking-tight">{activeTab === 'diary' ? 'Дневник питания' : 'Справочник'}</h1>
             </header>
 
-            {/* ОСНОВНОЙ КОНТЕНТ: только эта часть имеет право скроллиться */}
+            {/* ОСНОВНОЙ КОНТЕНТ */}
             <main className="flex-1 overflow-y-auto overscroll-contain w-full">
               
               {activeTab === 'diary' && (
                 <div className="p-6 space-y-6 pb-10">
                   <div className="flex items-center justify-between bg-zinc-800/50 rounded-2xl p-2 border border-zinc-800">
-                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(getLocalDateString(d));}} className="p-3 hover:bg-zinc-800 rounded-xl">
+                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(getLocalDateString(d)); setAiAdvice('');}} className="p-3 hover:bg-zinc-800 rounded-xl transition-colors">
                       <IconChevronLeft className="w-5 h-5 text-zinc-400" />
                     </button>
                     <div className="font-medium text-zinc-200">{displayDate(currentDate)}</div>
-                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()+1); setCurrentDate(getLocalDateString(d));}} 
-                            disabled={currentDate === getLocalDateString(new Date())} className="p-3 hover:bg-zinc-800 rounded-xl disabled:opacity-30">
+                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()+1); setCurrentDate(getLocalDateString(d)); setAiAdvice('');}} 
+                            disabled={currentDate === getLocalDateString(new Date())} className="p-3 hover:bg-zinc-800 rounded-xl disabled:opacity-30 transition-colors">
                       <IconChevronRight className="w-5 h-5 text-zinc-400" />
                     </button>
                   </div>
 
-                  <div className="bg-zinc-800/40 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4">
-                     <div className="flex justify-between items-end">
+                  <div className="bg-zinc-800/40 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4 relative overflow-hidden">
+                     <div className="flex justify-between items-end relative z-10">
                         <div>
                            <p className="text-zinc-400 text-sm font-medium mb-1">Съедено</p>
                            <p className="text-2xl font-bold text-zinc-100">{totalDailyCalories} <span className="text-sm font-medium text-zinc-500">/ {dailyGoal}</span></p>
@@ -204,9 +300,30 @@
                            </p>
                         </div>
                      </div>
-                     <div className="h-2.5 w-full bg-zinc-900 rounded-full overflow-hidden flex border border-zinc-800">
+                     <div className="h-2.5 w-full bg-zinc-900 rounded-full overflow-hidden flex border border-zinc-800 relative z-10">
                         <div className={`h-full transition-all duration-500 rounded-full ${isOverGoal ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${progressPercent}%` }}></div>
                      </div>
+                  </div>
+
+                  {/* ИИ Советник */}
+                  <div className="bg-emerald-950/10 border border-emerald-500/20 rounded-3xl p-5 shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
+                        ✨ Нейро-диетолог
+                      </h2>
+                      <button 
+                        onClick={getAiAdvice} 
+                        disabled={isAdviceLoading}
+                        className="text-xs font-medium bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 px-3 py-1.5 rounded-full active:scale-95 transition-all disabled:opacity-50"
+                      >
+                        {isAdviceLoading ? 'Анализируем...' : 'Получить совет'}
+                      </button>
+                    </div>
+                    {aiAdvice && (
+                      <p className="text-zinc-300 text-sm leading-relaxed animate-fade-in bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800/50">
+                        {aiAdvice}
+                      </p>
+                    )}
                   </div>
 
                   <form onSubmit={handleAddLog} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4">
@@ -221,7 +338,7 @@
                         <input type="number" placeholder="0" min="1" className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-12 outline-none focus:ring-2 focus:ring-emerald-500/30" value={gramsInput} onChange={(e) => setGramsInput(e.target.value)} required />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 font-medium">г</span>
                       </div>
-                      <button type="submit" disabled={!selectedFoodId || !gramsInput} className="bg-emerald-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white p-3.5 rounded-2xl flex-shrink-0 transition-transform active:scale-95">
+                      <button type="submit" disabled={!selectedFoodId || !gramsInput} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white p-3.5 rounded-2xl flex-shrink-0 transition-transform active:scale-95">
                         <IconPlus className="w-6 h-6" />
                       </button>
                     </div>
@@ -241,7 +358,7 @@
                               <div><p className="font-medium text-zinc-100">{food ? food.name : 'Удалено'}</p><p className="text-sm text-zinc-400">{log.grams} г</p></div>
                               <div className="flex items-center gap-4">
                                 <span className="font-semibold text-emerald-400">{log.totalCalories} ккал</span>
-                                <button onClick={() => handleDeleteLog(log.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2"><IconTrash className="w-5 h-5" /></button>
+                                <button onClick={() => handleDeleteLog(log.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2 transition-colors"><IconTrash className="w-5 h-5" /></button>
                               </div>
                             </li>
                           )
@@ -277,15 +394,25 @@
                     <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
                        <IconBook className="w-4 h-4 text-emerald-500" /> База продуктов
                     </h2>
-                    <form onSubmit={handleAddFood} className="bg-emerald-950/20 border border-emerald-500/20 rounded-3xl p-5 space-y-4 mb-6">
+                    <form onSubmit={handleAddFood} className="bg-emerald-950/20 border border-emerald-500/20 rounded-3xl p-5 space-y-4 mb-6 relative">
                        <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">Добавить продукт</h3>
-                       <input type="text" placeholder="Название (например: Творог)" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
+                       <input type="text" placeholder="Название (например: Авокадо)" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
                        <div className="flex gap-3">
                           <div className="flex-1 relative">
                             <input type="number" placeholder="0" min="1" step="0.1" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-24 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodCals} onChange={(e) => setNewFoodCals(e.target.value)} required />
-                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">ккал/100г</span>
+                            <span className="absolute right-12 top-1/2 -translate-y-1/2 text-zinc-500 text-sm pointer-events-none">ккал/100г</span>
+                            {/* ИИ Кнопка для оценки калорий */}
+                            <button
+                              type="button"
+                              onClick={estimateCaloriesWithAI}
+                              disabled={!newFoodName.trim() || isEstimatingCals}
+                              title="Узнать калорийность с помощью ИИ"
+                              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-emerald-400 hover:bg-emerald-500/20 rounded-xl transition-all disabled:opacity-30 disabled:hover:bg-transparent"
+                            >
+                              {isEstimatingCals ? <IconSpinner className="w-5 h-5 animate-spin" /> : '✨'}
+                            </button>
                           </div>
-                          <button type="submit" disabled={!newFoodName || !newFoodCals} className="bg-emerald-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-white px-5 py-3.5 rounded-2xl transition-transform active:scale-95">
+                          <button type="submit" disabled={!newFoodName || !newFoodCals} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white px-5 py-3.5 rounded-2xl transition-transform active:scale-95">
                             <IconPlus className="w-5 h-5" />
                           </button>
                        </div>
@@ -295,7 +422,7 @@
                       {foods.map(food => (
                         <li key={food.id} className="flex items-center justify-between bg-zinc-800/40 border border-zinc-800 rounded-2xl p-4">
                           <div className="flex-1 pr-4"><p className="font-medium text-zinc-100">{food.name}</p><p className="text-sm text-zinc-400">{food.calories} ккал / 100г</p></div>
-                          <button onClick={() => handleDeleteFood(food.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2"><IconTrash className="w-5 h-5" /></button>
+                          <button onClick={() => handleDeleteFood(food.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2 transition-colors"><IconTrash className="w-5 h-5" /></button>
                         </li>
                       ))}
                     </ul>
@@ -304,16 +431,16 @@
               )}
             </main>
 
-            {/* НАВИГАЦИЯ: тоже жестко зафиксированный блок */}
+            {/* НАВИГАЦИЯ */}
             <nav 
               className="bg-zinc-900 border-t border-zinc-800 flex justify-around items-center flex-shrink-0 pt-2"
               style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 12px)' }}
             >
-              <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-400'}`}>
                 <div className={`p-1.5 rounded-xl mb-1 ${activeTab === 'diary' ? 'bg-emerald-500/10' : ''}`}><IconCalendar className="w-6 h-6" /></div>
                 <span className="text-[11px] font-semibold tracking-wide">Дневник</span>
               </button>
-              <button onClick={() => setActiveTab('directory')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'directory' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+              <button onClick={() => setActiveTab('directory')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'directory' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-400'}`}>
                  <div className={`p-1.5 rounded-xl mb-1 ${activeTab === 'directory' ? 'bg-emerald-500/10' : ''}`}><IconBook className="w-6 h-6" /></div>
                 <span className="text-[11px] font-semibold tracking-wide">Справочник</span>
               </button>
