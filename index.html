@@ -2,10 +2,12 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
+  <!-- viewport-fit=cover - это самое важное правило для iOS, чтобы приложение понимало границы челки и подбородка -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
+  <!-- Делает статус-бар прозрачным, чтобы приложение сливалось с системой -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Калории</title>
+  <title>Дневник питания</title>
   
   <script src="https://cdn.tailwindcss.com"></script>
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -13,25 +15,37 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
+    :root {
+      /* Фоновый цвет приложения (очень темный, почти черный) */
+      --bg-app: #09090b; 
+      --bg-card: #18181b;
+    }
     ::-webkit-scrollbar { width: 0px; background: transparent; }
     
-    html, body { 
-      position: fixed; 
-      top: 0; left: 0; right: 0; bottom: 0;
-      overflow: hidden; 
-      background-color: #09090b; 
+    body { 
+      background-color: var(--bg-app); 
       margin: 0; 
       padding: 0; 
+      /* Убирает эффект резиновой прокрутки страницы за пределы контента на iOS */
+      overscroll-behavior-y: none; 
+      /* Отключаем выделение при тапе */
       -webkit-tap-highlight-color: transparent;
+      user-select: none;
     }
-    
-    #root { width: 100%; height: 100%; }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(5px); }
-      to { opacity: 1; transform: translateY(0); }
+    /* Специальные классы для работы с "подбородком" и "челкой" iPhone */
+    .ios-safe-top {
+      padding-top: calc(env(safe-area-inset-top) + 16px);
     }
-    .animate-fade-in { animation: fadeIn 0.4s ease-out forwards; }
+    .ios-safe-bottom-nav {
+      /* Тянем фон панели до самого низа экрана + даем отступ самим кнопкам */
+      padding-bottom: calc(env(safe-area-inset-bottom) + 12px);
+      padding-top: 12px;
+    }
+    .ios-safe-main-padding {
+      /* Чтобы контент можно было доскроллить до конца, не пряча под навигацией */
+      padding-bottom: calc(env(safe-area-inset-bottom) + 100px);
+    }
   </style>
 </head>
 <body>
@@ -40,56 +54,15 @@
   <script type="text/babel">
     const { useState, useMemo, useEffect } = React;
 
-    // --- Gemini API Setup ---
-    const apiKey = ""; // Ключ будет автоматически предоставлен средой выполнения
-    
-    const fetchGemini = async (prompt, asJson = false) => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-      const payload = {
-        contents: [{ parts: [{ text: prompt }] }],
-      };
-      
-      if (asJson) {
-        payload.generationConfig = { 
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: { calories: { type: "NUMBER" } }
-          }
-        };
-      }
-
-      // Экспоненциальная задержка при ошибках (до 5 попыток)
-      for (let attempt = 0; attempt < 5; attempt++) {
-        try {
-          const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-          if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-          const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-          return asJson ? JSON.parse(text) : text;
-        } catch (e) {
-          if (attempt === 4) throw e;
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
-        }
-      }
-    };
-
-    // --- Иконки ---
-    const IconPlus = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-7-7h14"/></svg>;
+    // --- Иконки (в стиле скриншота) ---
+    const IconPlus = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14m-7-7h14"/></svg>;
     const IconBook = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>;
     const IconCalendar = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>;
-    const IconTrash = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/></svg>;
     const IconChevronLeft = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>;
     const IconChevronRight = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>;
-    const IconUtensils = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2M7 2v20M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>;
-    const IconTarget = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>;
-    const IconSpinner = ({className}) => <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>;
+    const IconSparkles = ({className}) => <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>;
 
-    // --- Утилиты ---
+    // Утилиты дат
     const getLocalDateString = (dateObj) => {
       const year = dateObj.getFullYear();
       const month = String(dateObj.getMonth() + 1).padStart(2, '0');
@@ -112,36 +85,27 @@
 
     const calculateCalories = (grams, calPer100) => Math.round((grams / 100) * calPer100);
 
-    // --- Основной компонент ---
+    const DAILY_GOAL = 2000; // Цель калорий в день
+
     function App() {
       const [foods, setFoods] = useState(() => {
         try {
-          const saved = localStorage.getItem('calorieTracker_foods');
+          const saved = localStorage.getItem('premiumCalorie_foods');
           if (saved) return JSON.parse(saved);
         } catch (e) {}
         return [
-          { id: '1', name: 'Яблоко свежее', calories: 52 },
-          { id: '2', name: 'Банан', calories: 89 },
-          { id: '3', name: 'Куриное филе', calories: 113 },
-          { id: '4', name: 'Гречка (вареная)', calories: 132 },
-          { id: '5', name: 'Яйцо куриное', calories: 157 },
+          { id: '1', name: 'Куриное филе', calories: 113 },
+          { id: '2', name: 'Гречка (вареная)', calories: 132 },
+          { id: '3', name: 'Банан', calories: 89 },
         ];
       });
 
       const [dailyLogs, setDailyLogs] = useState(() => {
         try {
-          const saved = localStorage.getItem('calorieTracker_logs');
+          const saved = localStorage.getItem('premiumCalorie_logs');
           if (saved) return JSON.parse(saved);
         } catch (e) {}
         return {};
-      });
-
-      const [dailyGoal, setDailyGoal] = useState(() => {
-        try {
-          const saved = localStorage.getItem('calorieTracker_goal');
-          if (saved) return parseInt(saved, 10);
-        } catch (e) {}
-        return 2000;
       });
 
       const [currentDate, setCurrentDate] = useState(getLocalDateString(new Date()));
@@ -150,60 +114,9 @@
       const [gramsInput, setGramsInput] = useState('');
       const [newFoodName, setNewFoodName] = useState('');
       const [newFoodCals, setNewFoodCals] = useState('');
-      
-      // ИИ Состояния
-      const [isEstimatingCals, setIsEstimatingCals] = useState(false);
-      const [aiAdvice, setAiAdvice] = useState('');
-      const [isAdviceLoading, setIsAdviceLoading] = useState(false);
 
-      useEffect(() => localStorage.setItem('calorieTracker_foods', JSON.stringify(foods)), [foods]);
-      useEffect(() => localStorage.setItem('calorieTracker_logs', JSON.stringify(dailyLogs)), [dailyLogs]);
-      useEffect(() => localStorage.setItem('calorieTracker_goal', dailyGoal.toString()), [dailyGoal]);
-
-      // ИИ: Оценка калорий продукта
-      const estimateCaloriesWithAI = async () => {
-        if (!newFoodName.trim()) return;
-        setIsEstimatingCals(true);
-        try {
-          const prompt = `Определи примерную калорийность на 100 грамм для продукта: "${newFoodName}". Верни только JSON объект с одним полем 'calories'. Если продукт неизвестен, верни 0.`;
-          const result = await fetchGemini(prompt, true);
-          if (result && typeof result.calories === 'number') {
-            setNewFoodCals(result.calories.toString());
-          }
-        } catch (e) {
-          console.error("AI Estimation failed", e);
-        } finally {
-          setIsEstimatingCals(false);
-        }
-      };
-
-      // ИИ: Советник
-      const getAiAdvice = async () => {
-        setIsAdviceLoading(true);
-        try {
-          const currentDayLogs = dailyLogs[currentDate] || [];
-          const totalDailyCalories = currentDayLogs.reduce((sum, log) => sum + log.totalCalories, 0);
-          const remainingCalories = dailyGoal - totalDailyCalories;
-          
-          const availableFoods = foods.map(f => f.name).join(', ');
-          
-          const prompt = `Ты - позитивный, заботливый и лаконичный ИИ-диетолог.
-          Цель пользователя: ${dailyGoal} ккал.
-          Уже съедено сегодня: ${totalDailyCalories} ккал.
-          Осталось: ${remainingCalories} ккал.
-          В базе пользователя есть продукты: ${availableFoods}.
-          
-          Напиши короткий (максимум 2 предложения), дружелюбный совет на русском языке. Учитывай остаток калорий. Если есть запас - предложи что-то из базы. Если перебор - успокой. Не используй markdown и спецсимволы, пиши как живой человек.`;
-
-          const advice = await fetchGemini(prompt, false);
-          setAiAdvice(advice);
-        } catch (e) {
-          console.error("AI Advice failed", e);
-          setAiAdvice("Немного устал, не могу сейчас дать совет. Попробуйте чуть позже!");
-        } finally {
-          setIsAdviceLoading(false);
-        }
-      };
+      useEffect(() => { localStorage.setItem('premiumCalorie_foods', JSON.stringify(foods)); }, [foods]);
+      useEffect(() => { localStorage.setItem('premiumCalorie_logs', JSON.stringify(dailyLogs)); }, [dailyLogs]);
 
       const handleAddFood = (e) => {
         e.preventDefault();
@@ -224,225 +137,182 @@
           totalCalories: calculateCalories(parseFloat(gramsInput), food.calories)
         };
 
-        setDailyLogs(prev => ({
-          ...prev,
-          [currentDate]: [...(prev[currentDate] || []), newLog]
-        }));
+        setDailyLogs(prev => ({ ...prev, [currentDate]: [...(prev[currentDate] || []), newLog] }));
         setSelectedFoodId(''); setGramsInput('');
-        setAiAdvice(''); // Сбрасываем совет при добавлении новой еды
-      };
-
-      const handleDeleteLog = (logId) => {
-        setDailyLogs(prev => ({
-          ...prev,
-          [currentDate]: prev[currentDate].filter(log => log.id !== logId)
-        }));
-        setAiAdvice('');
-      };
-
-      const handleDeleteFood = (foodId) => {
-        setFoods(foods.filter(f => f.id !== foodId));
       };
 
       const currentDayLogs = dailyLogs[currentDate] || [];
       const totalDailyCalories = currentDayLogs.reduce((sum, log) => sum + log.totalCalories, 0);
-      
-      const remainingCalories = dailyGoal - totalDailyCalories;
-      const isOverGoal = remainingCalories < 0;
-      const progressPercent = Math.min((totalDailyCalories / dailyGoal) * 100, 100) || 0;
-      
-      const previewCalories = useMemo(() => {
-        if (selectedFoodId && gramsInput) {
-          const food = foods.find(f => f.id === selectedFoodId);
-          return food ? calculateCalories(parseFloat(gramsInput), food.calories) : 0;
-        }
-        return 0;
-      }, [selectedFoodId, gramsInput, foods]);
+      const remainingCalories = Math.max(0, DAILY_GOAL - totalDailyCalories);
+      const progressPercent = Math.min(100, (totalDailyCalories / DAILY_GOAL) * 100);
 
       return (
-        <div className="h-full w-full bg-zinc-950 flex justify-center font-sans text-zinc-100">
-          <div className="w-full max-w-md bg-zinc-900 flex flex-col h-full overflow-hidden shadow-2xl">
+        <div className="min-h-screen text-zinc-100 font-sans flex justify-center bg-black">
+          <div className="w-full max-w-md h-[100dvh] flex flex-col relative" style={{ backgroundColor: 'var(--bg-app)' }}>
             
-            {/* ШАПКА */}
-            <header 
-              className="px-6 pb-4 border-b border-zinc-800 flex items-center justify-center bg-zinc-900 flex-shrink-0"
-              style={{ paddingTop: 'calc(env(safe-area-inset-top) + 16px)' }}
-            >
-              <h1 className="text-xl font-semibold tracking-tight">{activeTab === 'diary' ? 'Дневник питания' : 'Справочник'}</h1>
+            {/* ШАПКА: Заголовок приложения */}
+            <header className="ios-safe-top px-6 flex justify-center items-center z-10 bg-[#09090b]/90 backdrop-blur-md sticky top-0 pb-4">
+              <h1 className="text-lg font-semibold tracking-wide text-zinc-100">
+                {activeTab === 'diary' ? 'Дневник питания' : 'Справочник'}
+              </h1>
             </header>
 
-            {/* ОСНОВНОЙ КОНТЕНТ */}
-            <main className="flex-1 overflow-y-auto overscroll-contain w-full">
+            {/* СКРОЛЛИРУЕМАЯ ОБЛАСТЬ */}
+            <main className="flex-1 overflow-y-auto px-5 ios-safe-main-padding space-y-5">
               
               {activeTab === 'diary' && (
-                <div className="p-6 space-y-6 pb-10">
-                  <div className="flex items-center justify-between bg-zinc-800/50 rounded-2xl p-2 border border-zinc-800">
-                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(getLocalDateString(d)); setAiAdvice('');}} className="p-3 hover:bg-zinc-800 rounded-xl transition-colors">
-                      <IconChevronLeft className="w-5 h-5 text-zinc-400" />
+                <>
+                  {/* Навигация по датам (стиль из макета) */}
+                  <div className="flex items-center justify-between bg-[#18181b] rounded-2xl p-2 mt-2">
+                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()-1); setCurrentDate(getLocalDateString(d));}} className="p-3 text-zinc-400 active:bg-zinc-800 rounded-xl transition-colors">
+                      <IconChevronLeft className="w-5 h-5" />
                     </button>
                     <div className="font-medium text-zinc-200">{displayDate(currentDate)}</div>
-                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()+1); setCurrentDate(getLocalDateString(d)); setAiAdvice('');}} 
-                            disabled={currentDate === getLocalDateString(new Date())} className="p-3 hover:bg-zinc-800 rounded-xl disabled:opacity-30 transition-colors">
-                      <IconChevronRight className="w-5 h-5 text-zinc-400" />
+                    <button onClick={() => {const d = new Date(currentDate); d.setDate(d.getDate()+1); setCurrentDate(getLocalDateString(d));}} 
+                            disabled={currentDate === getLocalDateString(new Date())} className="p-3 text-zinc-400 active:bg-zinc-800 rounded-xl disabled:opacity-30 transition-colors">
+                      <IconChevronRight className="w-5 h-5" />
                     </button>
                   </div>
 
-                  <div className="bg-zinc-800/40 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4 relative overflow-hidden">
-                     <div className="flex justify-between items-end relative z-10">
-                        <div>
-                           <p className="text-zinc-400 text-sm font-medium mb-1">Съедено</p>
-                           <p className="text-2xl font-bold text-zinc-100">{totalDailyCalories} <span className="text-sm font-medium text-zinc-500">/ {dailyGoal}</span></p>
+                  {/* Карточка прогресса (Съедено / Осталось) */}
+                  <div className="bg-[#18181b] rounded-3xl p-5 shadow-lg shadow-black/20">
+                    <div className="flex justify-between items-end mb-4">
+                      <div>
+                        <p className="text-xs text-zinc-400 font-medium mb-1">Съедено</p>
+                        <div className="text-zinc-100 font-semibold flex items-baseline gap-1">
+                          <span className="text-3xl">{totalDailyCalories}</span>
+                          <span className="text-sm text-zinc-500 font-medium">/ {DAILY_GOAL}</span>
                         </div>
-                        <div className="text-right">
-                           <p className="text-zinc-400 text-sm font-medium mb-1">{isOverGoal ? 'Перебор' : 'Осталось'}</p>
-                           <p className={`text-xl font-bold ${isOverGoal ? 'text-red-400' : 'text-emerald-400'}`}>
-                              {Math.abs(remainingCalories)} <span className="text-sm font-medium text-zinc-500">ккал</span>
-                           </p>
-                        </div>
-                     </div>
-                     <div className="h-2.5 w-full bg-zinc-900 rounded-full overflow-hidden flex border border-zinc-800 relative z-10">
-                        <div className={`h-full transition-all duration-500 rounded-full ${isOverGoal ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: `${progressPercent}%` }}></div>
-                     </div>
-                  </div>
-
-                  {/* ИИ Советник */}
-                  <div className="bg-emerald-950/10 border border-emerald-500/20 rounded-3xl p-5 shadow-sm space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h2 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-                        ✨ Нейро-диетолог
-                      </h2>
-                      <button 
-                        onClick={getAiAdvice} 
-                        disabled={isAdviceLoading}
-                        className="text-xs font-medium bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 px-3 py-1.5 rounded-full active:scale-95 transition-all disabled:opacity-50"
-                      >
-                        {isAdviceLoading ? 'Анализируем...' : 'Получить совет'}
-                      </button>
-                    </div>
-                    {aiAdvice && (
-                      <p className="text-zinc-300 text-sm leading-relaxed animate-fade-in bg-zinc-900/50 p-3 rounded-2xl border border-zinc-800/50">
-                        {aiAdvice}
-                      </p>
-                    )}
-                  </div>
-
-                  <form onSubmit={handleAddLog} className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 shadow-sm space-y-4">
-                    <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider">Добавить приём пищи</h2>
-                    <select className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={selectedFoodId} onChange={(e) => setSelectedFoodId(e.target.value)} required>
-                      <option value="" disabled className="text-zinc-500">Выберите продукт...</option>
-                      {foods.map(f => <option key={f.id} value={f.id}>{f.name} ({f.calories} ккал)</option>)}
-                    </select>
-
-                    <div className="flex gap-3">
-                      <div className="flex-1 relative">
-                        <input type="number" placeholder="0" min="1" className="w-full bg-zinc-800 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-12 outline-none focus:ring-2 focus:ring-emerald-500/30" value={gramsInput} onChange={(e) => setGramsInput(e.target.value)} required />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 font-medium">г</span>
                       </div>
-                      <button type="submit" disabled={!selectedFoodId || !gramsInput} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white p-3.5 rounded-2xl flex-shrink-0 transition-transform active:scale-95">
-                        <IconPlus className="w-6 h-6" />
-                      </button>
+                      <div className="text-right">
+                        <p className="text-xs text-zinc-400 font-medium mb-1">Осталось</p>
+                        <div className="text-emerald-400 font-semibold flex items-baseline gap-1 justify-end">
+                          <span className="text-2xl">{remainingCalories}</span>
+                          <span className="text-xs text-zinc-400">ккал</span>
+                        </div>
+                      </div>
                     </div>
-                    {previewCalories > 0 && <div className="text-sm text-zinc-400 text-center">Плюс <span className="font-medium text-emerald-400">{previewCalories} ккал</span> к дневнику</div>}
+                    {/* Прогресс-бар */}
+                    <div className="h-2.5 w-full bg-[#27272a] rounded-full overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full transition-all duration-500 ease-out" style={{ width: `${progressPercent}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* Баннер Нейро-диетолог */}
+                  <div className="bg-[#18181b] rounded-3xl p-4 flex items-center justify-between border border-[#27272a]">
+                    <div className="flex items-center gap-2">
+                      <IconSparkles className="w-5 h-5 text-amber-300" />
+                      <span className="text-xs font-bold text-emerald-400 tracking-widest uppercase">Нейро-диетолог</span>
+                    </div>
+                    <button className="bg-[#27272a] hover:bg-zinc-700 text-zinc-300 text-xs font-semibold px-4 py-2 rounded-full transition-colors">
+                      Получить совет
+                    </button>
+                  </div>
+
+                  {/* Карточка добавления приема пищи */}
+                  <form onSubmit={handleAddLog} className="bg-[#18181b] rounded-3xl p-5 shadow-lg">
+                    <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4">Добавить приём пищи</h2>
+                    <div className="space-y-3">
+                      <div className="relative">
+                        <select className="w-full bg-[#27272a] text-zinc-200 rounded-2xl px-4 py-4 outline-none appearance-none" value={selectedFoodId} onChange={(e) => setSelectedFoodId(e.target.value)} required>
+                          <option value="" disabled className="text-zinc-500">Выберите продукт...</option>
+                          {foods.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                        </select>
+                        <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-zinc-500">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-3">
+                        <div className="flex-1 relative">
+                          <input type="number" placeholder="0" min="1" className="w-full bg-[#27272a] text-zinc-200 rounded-2xl px-4 py-4 pr-12 outline-none placeholder:text-zinc-600" value={gramsInput} onChange={(e) => setGramsInput(e.target.value)} required />
+                          <span className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-500 font-medium text-sm">г</span>
+                        </div>
+                        <button type="submit" disabled={!selectedFoodId || !gramsInput} className="bg-[#27272a] active:bg-emerald-600/20 text-zinc-400 active:text-emerald-500 disabled:opacity-50 w-14 rounded-2xl flex items-center justify-center transition-colors">
+                          <IconPlus className="w-6 h-6" />
+                        </button>
+                      </div>
+                    </div>
                   </form>
 
+                  {/* История за день */}
                   <div>
-                    <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4">История за день</h2>
+                    <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 px-1 mt-6">История за день</h2>
                     {currentDayLogs.length === 0 ? (
-                      <div className="text-center py-10 text-zinc-600 flex flex-col items-center"><IconUtensils className="w-10 h-10 mb-3 opacity-20" /><p>Пока ничего не съедено</p></div>
+                      <div className="text-center py-8 text-zinc-600 font-medium text-sm">Ничего не найдено</div>
                     ) : (
-                      <ul className="space-y-3">
+                      <div className="space-y-3">
                         {currentDayLogs.map(log => {
                           const food = foods.find(f => f.id === log.foodId);
                           return (
-                            <li key={log.id} className="flex items-center justify-between bg-zinc-800/40 border border-zinc-800 rounded-2xl p-4">
-                              <div><p className="font-medium text-zinc-100">{food ? food.name : 'Удалено'}</p><p className="text-sm text-zinc-400">{log.grams} г</p></div>
-                              <div className="flex items-center gap-4">
-                                <span className="font-semibold text-emerald-400">{log.totalCalories} ккал</span>
-                                <button onClick={() => handleDeleteLog(log.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2 transition-colors"><IconTrash className="w-5 h-5" /></button>
+                            <div key={log.id} className="flex items-center justify-between bg-[#18181b] rounded-2xl p-4">
+                              <div>
+                                <p className="font-semibold text-zinc-200 text-sm mb-0.5">{food ? food.name : 'Удалено'}</p>
+                                <p className="text-xs text-zinc-500">{log.grams} г</p>
                               </div>
-                            </li>
+                              <div className="flex items-center gap-4">
+                                <span className="font-semibold text-zinc-300 text-sm">{log.totalCalories} ккал</span>
+                                <button onClick={() => setDailyLogs(p => ({...p, [currentDate]: p[currentDate].filter(l => l.id !== log.id)}))} className="text-zinc-600 active:text-red-400 p-1">
+                                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                              </div>
+                            </div>
                           )
                         })}
-                      </ul>
+                      </div>
                     )}
                   </div>
-                </div>
+                </>
               )}
 
               {activeTab === 'directory' && (
-                <div className="p-6 space-y-8 pb-10">
-                  <div>
-                    <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                       <IconTarget className="w-4 h-4 text-emerald-500" /> Ваша цель
-                    </h2>
-                    <div className="bg-zinc-800/40 border border-zinc-800 rounded-3xl p-5">
-                       <p className="text-sm text-zinc-400 mb-3">Суточная норма калорий</p>
-                       <div className="relative">
-                          <input 
-                             type="number" 
-                             min="100" 
-                             className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[18px] rounded-2xl px-4 py-3.5 pr-20 outline-none focus:ring-2 focus:ring-emerald-500/30 font-medium" 
-                             value={dailyGoal || ''} 
-                             onChange={(e) => setDailyGoal(Number(e.target.value))} 
-                          />
-                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 font-medium">ккал</span>
-                       </div>
-                    </div>
-                  </div>
-
-                  <div>
-                    <h2 className="text-sm font-semibold text-zinc-400 uppercase tracking-wider mb-4 flex items-center gap-2">
-                       <IconBook className="w-4 h-4 text-emerald-500" /> База продуктов
-                    </h2>
-                    <form onSubmit={handleAddFood} className="bg-emerald-950/20 border border-emerald-500/20 rounded-3xl p-5 space-y-4 mb-6 relative">
-                       <h3 className="text-sm font-semibold text-emerald-400 flex items-center gap-2">Добавить продукт</h3>
-                       <input type="text" placeholder="Название (например: Авокадо)" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
+                <>
+                  <form onSubmit={handleAddFood} className="bg-[#18181b] rounded-3xl p-5 shadow-lg mt-2">
+                     <h2 className="text-xs font-bold text-emerald-400 uppercase tracking-widest mb-4 flex items-center gap-2">Создать продукт</h2>
+                     <div className="space-y-3">
+                       <input type="text" placeholder="Название (например, Яблоко)" className="w-full bg-[#27272a] text-zinc-200 rounded-2xl px-4 py-4 outline-none placeholder:text-zinc-600" value={newFoodName} onChange={(e) => setNewFoodName(e.target.value)} required />
                        <div className="flex gap-3">
                           <div className="flex-1 relative">
-                            <input type="number" placeholder="0" min="1" step="0.1" className="w-full bg-zinc-900 border border-zinc-700 text-zinc-100 text-[16px] rounded-2xl px-4 py-3.5 pr-24 outline-none focus:ring-2 focus:ring-emerald-500/30" value={newFoodCals} onChange={(e) => setNewFoodCals(e.target.value)} required />
-                            <span className="absolute right-12 top-1/2 -translate-y-1/2 text-zinc-500 text-sm pointer-events-none">ккал/100г</span>
-                            {/* ИИ Кнопка для оценки калорий */}
-                            <button
-                              type="button"
-                              onClick={estimateCaloriesWithAI}
-                              disabled={!newFoodName.trim() || isEstimatingCals}
-                              title="Узнать калорийность с помощью ИИ"
-                              className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-emerald-400 hover:bg-emerald-500/20 rounded-xl transition-all disabled:opacity-30 disabled:hover:bg-transparent"
-                            >
-                              {isEstimatingCals ? <IconSpinner className="w-5 h-5 animate-spin" /> : '✨'}
-                            </button>
+                            <input type="number" placeholder="0" min="1" step="0.1" className="w-full bg-[#27272a] text-zinc-200 rounded-2xl px-4 py-4 pr-16 outline-none placeholder:text-zinc-600" value={newFoodCals} onChange={(e) => setNewFoodCals(e.target.value)} required />
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-500 text-xs font-medium">ккал</span>
                           </div>
-                          <button type="submit" disabled={!newFoodName || !newFoodCals} className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white px-5 py-3.5 rounded-2xl transition-transform active:scale-95">
-                            <IconPlus className="w-5 h-5" />
-                          </button>
+                          <button type="submit" disabled={!newFoodName || !newFoodCals} className="bg-emerald-600 disabled:bg-[#27272a] disabled:text-zinc-600 text-zinc-100 font-semibold px-6 rounded-2xl transition-colors">Добавить</button>
                        </div>
-                    </form>
-                    
-                    <ul className="space-y-3">
+                     </div>
+                  </form>
+
+                  <div>
+                    <h2 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-4 px-1 mt-6">Справочник ({foods.length})</h2>
+                    <div className="space-y-3">
                       {foods.map(food => (
-                        <li key={food.id} className="flex items-center justify-between bg-zinc-800/40 border border-zinc-800 rounded-2xl p-4">
-                          <div className="flex-1 pr-4"><p className="font-medium text-zinc-100">{food.name}</p><p className="text-sm text-zinc-400">{food.calories} ккал / 100г</p></div>
-                          <button onClick={() => handleDeleteFood(food.id)} className="text-zinc-600 hover:text-red-400 p-2 -mr-2 transition-colors"><IconTrash className="w-5 h-5" /></button>
-                        </li>
+                        <div key={food.id} className="flex items-center justify-between bg-[#18181b] rounded-2xl p-4">
+                          <div className="flex-1 pr-4">
+                            <p className="font-semibold text-zinc-200 text-sm mb-0.5">{food.name}</p>
+                            <p className="text-xs text-zinc-500">{food.calories} ккал на 100 г</p>
+                          </div>
+                          <button onClick={() => setFoods(foods.filter(f => f.id !== food.id))} className="text-zinc-600 active:text-red-400 p-2">
+                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                          </button>
+                        </div>
                       ))}
-                    </ul>
+                    </div>
                   </div>
-                </div>
+                </>
               )}
             </main>
 
-            {/* НАВИГАЦИЯ */}
-            <nav 
-              className="bg-zinc-900 border-t border-zinc-800 flex justify-around items-center flex-shrink-0 pt-3 pb-6"
-            >
-              <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-400'}`}>
-                <div className={`p-1.5 rounded-xl mb-1 ${activeTab === 'diary' ? 'bg-emerald-500/10' : ''}`}><IconCalendar className="w-6 h-6" /></div>
-                <span className="text-[11px] font-semibold tracking-wide">Дневник</span>
-              </button>
-              <button onClick={() => setActiveTab('directory')} className={`flex flex-col items-center p-2 transition-colors ${activeTab === 'directory' ? 'text-emerald-400' : 'text-zinc-500 hover:text-zinc-400'}`}>
-                 <div className={`p-1.5 rounded-xl mb-1 ${activeTab === 'directory' ? 'bg-emerald-500/10' : ''}`}><IconBook className="w-6 h-6" /></div>
-                <span className="text-[11px] font-semibold tracking-wide">Справочник</span>
-              </button>
+            {/* НИЖНЯЯ НАВИГАЦИЯ (Идеальный подбородок) */}
+            <nav className="absolute bottom-0 w-full z-20 bg-[#09090b] border-t border-zinc-800/50 ios-safe-bottom-nav">
+              <div className="flex justify-around items-center px-2">
+                <button onClick={() => setActiveTab('diary')} className={`flex flex-col items-center w-24 gap-1 ${activeTab === 'diary' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                  <IconCalendar className="w-6 h-6" />
+                  <span className="text-[10px] font-bold tracking-wider">Дневник</span>
+                </button>
+                <button onClick={() => setActiveTab('directory')} className={`flex flex-col items-center w-24 gap-1 ${activeTab === 'directory' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                   <IconBook className="w-6 h-6" />
+                  <span className="text-[10px] font-bold tracking-wider">Справочник</span>
+                </button>
+              </div>
             </nav>
 
           </div>
